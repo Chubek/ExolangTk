@@ -33,6 +33,35 @@ manifest:
 
 modules:
 
+  - name: platform
+    header: include/FFItk/ffi_platform.h
+    summary: >
+      Toolchain and qualifier shims for FFItk: defines the FFI_DEF function
+      qualifier macro (user-overridable) and re-exports the target detection
+      macros from InteropTk::platform so FFItk headers need only one portability
+      include.
+    provides:
+      - FFI_DEF function qualifier macro (user-overridable)
+      - FFI_OS_* / FFI_ARCH_* aliases over the ITK_ detection macros
+    depends-on:
+      internal: []
+      interoptk: [platform]
+    stability: stable
+
+  - name: types
+    header: include/FFItk/ffi_types.h
+    summary: >
+      Common FFItk value types: the ffi_status code, the ffi_arg / ffi_sarg
+      word-sized argument slots, and the opaque ffi_value return slot used by
+      the call layer.
+    provides:
+      - ffi_status enum (FFI_OK, FFI_EINVAL, ...)
+      - ffi_arg / ffi_sarg word slots, ffi_value return slot
+    depends-on:
+      internal: [platform]
+      interoptk: [platform]
+    stability: stable
+
   - name: loader
     header: include/FFItk/ffi_loader.h
     summary: >

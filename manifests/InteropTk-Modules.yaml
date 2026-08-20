@@ -35,7 +35,9 @@ modules:
       off the macros and enums defined here.
     provides:
       - ITK_OS_*, ITK_ARCH_*, ITK_ABI_* detection macros
+      - ITK_DEF function qualifier macro (user-overridable)
       - itk_target_info struct and itk_target_query()
+      - itk_bool typedef and ITK_TRUE / ITK_FALSE constants
     depends-on: []
     stability: stable
 
@@ -50,6 +52,9 @@ modules:
       - itk_type descriptor and itk_type_kind enum
       - itk_type_size(), itk_type_align(), itk_type_equal()
       - builders for pointer, array, and function types
+      - itk_type_prim(), itk_type_is_* classification helpers
+      - itk_type_kind_name() and itk_char_is_signed()
+      - ITK_QUAL_* type-qualifier bit constants
     depends-on: [platform]
     stability: stable
 
@@ -63,6 +68,9 @@ modules:
       - itk_record_builder API
       - itk_field_offset(), itk_record_size(), itk_record_align()
       - bitfield allocation rules per target ABI
+      - itk_record_kind / itk_abi_kind enums, itk_layout_default_abi()
+      - itk_record_field(), itk_record_bitfield() adders
+      - itk_field_bitfield_info() bitfield accessor
     depends-on: [platform, ctypes]
     stability: stable
 
@@ -100,6 +108,9 @@ modules:
     provides:
       - itk_cdecl_parse(), itk_cdecl_format()
       - diagnostic reporting via itk_cdecl_error
+      - itk_cdecl parse context with type/param arenas
+      - itk_cdecl_type()/itk_cdecl_name() result accessors
+      - ITK_CDECL_MAX_* capacity macro constants
     depends-on: [ctypes]
     stability: experimental
 
@@ -113,6 +124,9 @@ modules:
     provides:
       - itk_read_scalar(), itk_write_scalar()
       - itk_marshal_record(), itk_unmarshal_record()
+      - itk_scalar value carrier union (u/s/d/ld views)
+      - itk_read_scalar_le/be, itk_write_scalar_le/be endian accessors
+      - itk_record_read_field()/itk_record_write_field() incl. bitfields
     depends-on: [ctypes, layout]
     stability: stable
 
@@ -125,7 +139,10 @@ modules:
     provides:
       - itk_str_view (borrowed) and itk_str_buf (owned)
       - itk_str_from_c(), itk_str_to_c(), itk_utf8_validate()
-    depends-on: [platform]
+      - itk_str_view_equals(), itk_str_view_index() helpers
+      - itk_str_buf_init/free/reserve/append family
+      - itk_utf8_status diagnostic enum with error offsets
+    depends-on: [platform, alloc]
     stability: stable
 
   - name: error
@@ -136,7 +153,11 @@ modules:
       its own exception or result mechanism.
     provides:
       - itk_status struct with domain/code/message
+      - ITK_DOMAIN_* domain constants and ITK_STATUS_MESSAGE_MAX
+      - itk_status_code enum (ITK_EINVAL ... ITK_ETRUNC, ITK_EFAIL)
+      - itk_status_ok(), itk_status_is_ok(), itk_status_set()
       - itk_status_from_errno(), itk_status_from_lasterror()
+      - itk_status_from_os() raw code mapping
     depends-on: [platform]
     stability: stable
 
@@ -149,7 +170,9 @@ modules:
       buffers.
     provides:
       - itk_allocator vtable and default libc adapter
-      - itk_arena with itk_arena_push()/itk_arena_reset()
+      - itk_allocator_alloc/realloc/free/zalloc call helpers
+      - itk_arena with itk_arena_init/push/reset/destroy
+      - ITK_ARENA_BLOCK_SIZE default block-size macro constant
     depends-on: [platform]
     stability: stable
 
