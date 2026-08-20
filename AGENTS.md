@@ -1,176 +1,282 @@
-# AGENTS.md
+# AGENTS.md — ExolangTk Contributor and AI-Agent Guidelines
 
-This file provides guidance to agentic AI tools when working on the **ExolangTk** project.
+This document is the authoritative reference for all contributors and AI agents
+working in the ExolangTk repository. Read it fully before touching any file.
+When this document conflicts with a code comment or README, this document wins.
 
-## Project Overview
+Remember to implement `CMakeLists.txt` at the root, and subdirectories.
 
-**ExolangTk** is a collection of C99 **header-only** libraries for building compilers and interpreters that need to interoperate with native code. It is split into two toolkits with a strict architectural boundary:
+---
 
-- **InteropTk** — the static "building-block" layer. Models C types, ABI record layout, calling-convention metadata, symbol mangling, declaration parsing, value marshalling, and C-consumable API macros. Contains **no** runtime code-generation or dynamic loading.
-- **FFItk** — the dynamic FFI layer. Loads shared libraries, describes and performs foreign calls, generates trampolines, and exposes host-callable closures. **Builds on** InteropTk and must not re-declare type/layout/convention facts already owned by it.
+## 1. Repository Overview
 
-Dependency direction is one-way: `FFItk → InteropTk`. Never introduce an edge from InteropTk back to FFItk.
+ExolangTk is a **C99, header-only toolkit ecosystem** for compiler and
+interpreter interoperability. It is organized into four subsystems, each
+governed by a YAML manifest under `manifests/`.
 
-## Directory Layout
+| Subsystem      | Manifest file                       | Symbol prefix | Macro prefix |
+|----------------|-------------------------------------|---------------|--------------|
+| InteropTk      | `manifests/InteropTk-Modules.yaml`  | `itk_`        | `ITK_`       |
+| FFItk          | `manifests/FFItk-Modules.yaml`      | `ffi_`        | `FFI_`       |
+| DebugTk        | `manifests/DebugTk-Modules.yaml`    | `dtk_`        | `DTK_`       |
+| ExtensionTk    | `manifests/ExtensionTk-Modules.yaml`| `etk_`        | `ETK_`       |
 
-.
-├── docs                     # Doxygen configuration and manual sources
-│   ├── CMakeLists.txt
-│   ├── Doxyfile.in          # Configured at build time (@VAR@ substitution)
-│   ├── FrontPage.md         # Doxygen main page
-│   ├── layout.xml           # Doxygen navigation layout
-│   └── manual               # Long-form manual pages
-├── include
-│   ├── FFItk                # FFItk module headers (ffi_*.h)
-│   ├── FFItk.h              # Umbrella header: includes all of FFItk
-│   ├── InteropTk            # InteropTk module headers (itk_*.h)
-│   └── InteropTk.h          # Umbrella header: includes all of InteropTk
-└── manifests
-    ├── FFItk-Modules.yaml    # Source of truth for FFItk modules
-    └── InteropTk-Modules.yaml# Source of truth for InteropTk modules
+---
+
+## 2. Dependency Architecture
+
+Dependencies flow in **one direction only**:
+
+```
+FFItk  ──────────────────────────────┐
+DebugTk  ──────────────────────────► InteropTk
+ExtensionTk  (+ FFItk) ─────────────┘
+```
+Strict rules:
+
+- **InteropTk** has no intra-project dependencies. It is the base layer.
+- **FFItk** may depend on InteropTk only.
+- **DebugTk** may depend on InteropTk only.
+- **ExtensionTk** may depend on InteropTk and FFItk. It must not depend on
+  DebugTk.
+- No subsystem may introduce a circular dependency at any granularity.
+- Cross-subsystem `depends_on` entries in YAML manifests are the source of
+  truth. Never add a `#include` that is not reflected there.
+
+When implementing a module, satisfy its `depends_on` list and nothing else.
+Do not reach into a sibling module that is not listed.
+
+---
+
+## 3. Manifest Files Are the Source of Truth
+
+Before writing or editing any header, read the relevant YAML manifest.
 
 
-- **The `manifests/*.yaml` files are the source of truth.** The set of modules, their headers, their `provides` symbols, their dependencies, and their stability all originate there. When implementing, read the relevant manifest first and keep the header in sync with it.
-- Each module `foo` in InteropTk maps to `include/InteropTk/itk_foo.h`; each module `bar` in FFItk maps to `include/FFItk/ffi_bar.h`.
-- Umbrella headers (`InteropTk.h`, `FFItk.h`) include every module header of their toolkit in dependency order.
+manifests/
+  InteropTk-Modules.yaml
+  FFItk-Modules.yaml
+  DebugTk-Modules.yaml
+  ExtensionTk-Modules.yaml
 
-## Namespaces & Naming
+Every manifest entry contains:
 
-| Toolkit    | Symbol prefix | Macro prefix | Header prefix |
-|------------|---------------|--------------|---------------|
-| InteropTk  | `itk_`        | `ITK_`       | `itk_`        |
-| FFItk      | `ffi_`        | `FFI_`       | `ffi_`        |
+- `name` — canonical module identifier.
+- `header` — the exact path where the header lives.
+- `brief` — the public description, usable verbatim as the `@file` Doxygen
+  brief.
+- `stability` — `stable` | `experimental` | `deprecated`.
+- `depends_on` — explicit intra- and cross-subsystem dependencies.
+- `provides` — exhaustive lists of types, functions, macros, enums, and
+  constants the module exposes.
 
-- Public functions, types, and enum members use the lowercase prefix (`itk_layout_of`, `ffi_cif`).
-- Public macros and include guards use the uppercase prefix (`ITK_LAYOUT_H`, `FFI_CIF_H`).
-- Internal helpers not meant for consumers use a double-underscore suffix on the prefix: `itk__` / `ffi__`. Never document these as public API.
-- Enum members are prefixed with their type context, e.g. `FFI_ABI_SYSV`, `ITK_TYPE_INT32`.
+**Every symbol listed under `provides` must appear in the corresponding
+header.** If a symbol is not in the manifest it must not be exported. If
+you need a new symbol, add it to the manifest first, then implement it.
 
-## Header-Only Rules (STRICT)
+---
 
-These libraries are header-only. Adhere to the following invariants:
+## 4. Implementation Pattern
 
-1. **No non-inline definitions with external linkage by default.** Every function definition in a header must be either `static inline` or guarded behind an implementation macro (see below).
-2. **Single-header implementation pattern.** Support the common opt-in pattern:
-   ```c
-   #define ITK_LAYOUT_IMPLEMENTATION
-   #include <InteropTk/itk_layout.h>
-   ```
-   - When the `*_IMPLEMENTATION` macro is defined in exactly one translation unit, non-inline function bodies are emitted there.
-   - Otherwise only declarations (and `static inline` helpers) are visible.
-   - Use `ITK_DEF` / `FFI_DEF` function-qualifier macros that expand appropriately (e.g. `static inline` vs. extern-with-definition) so the same source serves both modes.
-3. **Idempotent inclusion.** Every header has an include guard and must be safe to include multiple times and in any order that respects declared dependencies.
-4. **No global mutable state** in headers. Any required state must live in caller-provided structs or explicit contexts (e.g. `ffi_library`, `itk_arena`).
-5. **No dependency on a build system for correctness.** A consumer copying `include/` into their tree must be able to compile against the headers with only a C99 compiler.
-6. **C99 only.** No C11/C++ features. No compiler-specific extensions unless wrapped in a `platform`-module feature macro with a portable fallback.
-7. **Freestanding-friendly.** Prefer `<stddef.h>`, `<stdint.h>`, `<stdbool.h>`. Isolate any `<stdlib.h>`/`<string.h>` usage so hosts can override allocation and memory routines (via the `alloc` module).
+### 4.1 Header-only with `*_IMPLEMENTATION` guard
 
-## Dependency Discipline
+Every module follows this split-compilation pattern:
 
-- Consult the `depends-on` block in the manifest before adding an `#include`. A module may only include headers of modules listed as its dependencies (internal or cross-toolkit).
-- FFItk modules include InteropTk headers via `<InteropTk/itk_*.h>`; the reverse is forbidden.
-- Do not create circular includes. If two modules seem mutually dependent, the shared declarations belong in a lower-level module.
+```c
+/* ── public declarations ──────────────────────────────────────────────── */
+#ifndef ETK_DYNLOAD_H
+#define ETK_DYNLOAD_H
 
-## Coding Conventions
+#include <stdint.h>
+/* ... other includes ... */
 
-- Indentation: 4 spaces, no tabs. Braces on the same line for functions and control flow (K&R).
-- Return values: functions that can fail return an `itk_status` / `ffi_status` code; out-parameters carry results. Use the `error` module's conventions in InteropTk.
-- Ownership: document ownership transfer explicitly in Doxygen (`@note Ownership ...`). Allocation goes through the `alloc` module's vtables, never raw `malloc` in library code paths that hosts may want to control.
-- All public identifiers must appear in the module's `provides` list in the manifest. If you add a new public symbol, update the manifest in the same change.
-- Keep executable/generated-memory concerns (W^X, cache flushing) confined to FFItk's `trampoline` module.
+/* type definitions, static inline helpers, and declarations */
 
-## Documentation Requirements (Doxygen)
+#ifdef ETK_DYNLOAD_IMPLEMENTATION
+/* ── implementation section ─────────────────────────────────────────── */
+/* non-trivial function bodies go here, guarded by the macro */
+#endif /* ETK_DYNLOAD_IMPLEMENTATION */
 
-**Every public declaration must carry a rich Doxygen docstring.** Documentation is not optional and is checked as part of review. Use Javadoc-style `/** ... */` blocks.
+#endif /* ETK_DYNLOAD_H */
+```
+Rules:
 
-Required tags, where applicable:
+- The implementation guard name must be `<MACRO_PREFIX><MODULE_NAME_UPPER>_IMPLEMENTATION`.
+- Only **one** translation unit in a project may define the guard.
+- Never place a definition that generates object code outside the
+  `*_IMPLEMENTATION` block. Violating this causes ODR violations in
+  multi-TU builds.
 
-- `@file` at the top of every header, with `@brief` and a one-paragraph description of the module's role.
-- `@defgroup` / `@ingroup` so each header contributes to a module group that matches the manifest module name.
-- `@brief` for every function, type, macro, and enum.
-- `@param[in]`, `@param[out]`, `@param[in,out]` with direction annotations for every parameter.
-- `@retval` for each meaningful status/return value, or `@return` for value-returning functions.
-- `@pre` / `@post` for contracts (non-null requirements, initialization state, alignment).
-- `@note`, `@warning` for ownership, lifetime, thread-safety, and platform caveats.
-- `@sa` cross-references to related symbols (e.g. link `ffi_call` to `ffi_cif_prepare`).
-- `@par Example` with a compilable snippet for each primary entry point.
-- `@since` referencing the toolkit version (currently `0.1.0`).
+### 4.2 Function qualifiers
 
-### File header template
+Use the subsystem-specific qualifier macro for every non-trivial function
+body. Qualify `static inline` helpers that truly belong in the header
+without the guard.
+
+| Subsystem   | Qualifier macro | Expands to (default) |
+|-------------|-----------------|----------------------|
+| InteropTk   | `ITK_DEF`       | `static`             |
+| FFItk       | `FFI_DEF`       | `static`             |
+| DebugTk     | `DTK_DEF`       | `static`             |
+| ExtensionTk | `ETK_DEF`       | `static`             |
+
+Each subsystem's `platform.h` defines its qualifier macro and allows the
+user to override it (e.g. to `extern`) by defining
+`<MACRO_PREFIX>DEF` before the first include.
+
+### 4.3 No global mutable state
+
+Every module that needs mutable state must accept it as a caller-supplied
+struct pointer. No `static` variables with mutable values, no global
+singletons, no thread-local storage that the user cannot control. This
+allows multiple independent runtimes to coexist in a single process — a
+hard requirement for all four subsystems.
+
+---
+
+## 5. C Standard and Portability
+
+- **Target standard: C99.** No C11, no C17, no compiler extensions.
+- Do not use VLAs (variable-length arrays) — they are optional in C11 and
+  entirely absent from strict C99 targets.
+- Do not use `__attribute__`, `__declspec`, `_Pragma`, or any
+  compiler-specific keyword directly in module code. Gate them behind a
+  platform macro defined in the subsystem's `platform.h`.
+- Do not use `//` comments in `.h` files that may be processed by strict
+  C89 preprocessors. Use `/* */`.
+- Assume `<stdint.h>` and `<stddef.h>` are available. Do not assume
+  `<stdbool.h>` is available; define a local `ETK_BOOL` / `ITK_BOOL` etc.
+  alias if needed.
+- Do not include `<windows.h>` unconditionally. Gate it behind
+  `ETK_OS_WINDOWS` (or the subsystem equivalent) defined in `platform.h`.
+- Arithmetic on pointer-sized integers must use `uintptr_t` or `intptr_t`,
+  never `long` or `int`.
+
+---
+
+## 6. Naming Conventions
+
+### 6.1 Symbol prefixes
+
+| Kind             | Pattern                          | Example                          |
+|------------------|----------------------------------|----------------------------------|
+| Public function  | `<prefix>_<module>_<verb>`       | `etk_lib_open`, `itk_layout_size`|
+| Type / struct    | `<prefix>_<noun>`                | `ffi_cif`, `dtk_breakpoint`      |
+| Enum constant    | `<PREFIX>_<NOUN>`                | `ETK_OK`, `ITK_KIND_STRUCT`      |
+| Macro constant   | `<PREFIX>_<NOUN>`                | `FFI_MAX_ARGS`, `DTK_PAGESIZE`   |
+| Feature macro    | `<PREFIX>_HAS_<FEATURE>`         | `ETK_HAS_DLOPEN`                 |
+| OS detect macro  | `<PREFIX>_OS_<NAME>`             | `ITK_OS_LINUX`                   |
+| Arch detect macro| `<PREFIX>_ARCH_<NAME>`           | `DTK_ARCH_AARCH64`               |
+| Impl guard       | `<PREFIX><MODULE_UPPER>_IMPLEMENTATION` | `FFI_CIF_IMPLEMENTATION` |
+| Header guard     | `<PREFIX_UPPER>_<MODULE_UPPER>_H`| `ETK_DYNLOAD_H`, `ITK_LAYOUT_H`  |
+
+### 6.2 File names
+
+Headers are lowercase with the subsystem prefix:
+
+```
+include/InteropTk/itk_platform.h
+include/FFItk/ffi_cif.h
+include/DebugTk/dtk_unwind.h
+include/ExtensionTk/etk_dynload.h
+```
+No mixed-case filenames.
+
+### 6.3 Internal helpers
+
+Symbols not listed in `provides` must be prefixed with a double underscore
+inside the `*_IMPLEMENTATION` block **or** be `static` functions/macros
+with a leading `_` that appear only inside the implementation guard. They
+must not be visible outside their translation unit.
+
+---
+
+## 7. Documentation Requirements
+
+All documentation is written in **Doxygen Javadoc style** (`/** ... */`).
+
+### 7.1 Module header block
+
+Every header file must open (after the include guard) with a `@file` block
+that matches the manifest `brief` verbatim:
 
 ```c
 /**
- * @file itk_layout.h
- * @ingroup itk_layout
- * @brief ABI record layout: size, alignment, and field offset computation.
+ * @file etk_dynload.h
+ * @brief Thin, portable wrapper around dlopen/dlsym/dlclose (POSIX) and
+ *        LoadLibraryEx/GetProcAddress/FreeLibrary (Windows). Provides a
+ *        uniform etk_lib_handle / etk_sym_handle API with structured error
+ *        reporting, path-search helpers, and RTLD flag abstraction.
  *
- * This header models how aggregate types are laid out in memory for a given
- * target ABI. Given a sequence of member types described by the @ref itk_ctypes
- * module, it computes total size, alignment, per-field byte offsets, and any
- * required tail padding, honoring packing directives and natural alignment.
- *
- * @note This is a static building-block module of InteropTk. It performs no
- *       allocation of its own beyond what the caller-supplied @ref itk_arena
- *       provides, and holds no global state.
- * @sa itk_ctypes.h
- * @since 0.1.0
+ * @stability experimental
+ * @depends ExtensionTk::platform, ExtensionTk::types
  */
-#ifndef ITK_LAYOUT_H
-#define ITK_LAYOUT_H
-/* ... */
-#endif /* ITK_LAYOUT_H */
+```
+### 7.2 Every exported symbol must be documented
 
-### Function docstring template
+- Functions: `@brief`, `@param` for every parameter, `@return`, and
+  `@note` when there are ownership or threading constraints.
+- Types and structs: `@brief` plus a `@var` line for every field.
+- Macros: `@brief` plus `@param` for function-like macros.
+- Enum constants: at minimum an inline `/**< description */` comment.
 
-c
-/**
- * @brief Compute the ABI layout of an aggregate type.
- *
- * Walks @p members in declaration order, assigning each field a byte offset
- * that satisfies its natural alignment (or the record's packing override),
- * and accumulates the record's overall size and alignment. Tail padding is
- * added so the total size is a multiple of the record alignment.
- *
- * @param[in]  members   Array of @p count member type descriptors. Must be
- *                       non-NULL when @p count is greater than zero.
- * @param[in]  count     Number of members in @p members.
- * @param[in]  packing   Packing directive (0 selects natural alignment).
- * @param[out] out       Receives the computed layout. Must be non-NULL.
- *
- * @retval ITK_OK              Layout computed successfully.
- * @retval ITK_ERR_INVALID     A NULL pointer or malformed member was supplied.
- * @retval ITK_ERR_OVERFLOW    The accumulated size exceeded the addressable range.
- *
- * @pre  Every entry in @p members has been initialized via the @ref itk_ctypes API.
- * @post On success, @p out->offsets contains @p count valid byte offsets.
- *
- * @note This routine is pure and thread-safe: it reads @p members and writes
- *       only through @p out.
- * @warning The lifetime of @p out->offsets follows @p out; it is not heap-owned.
- *
- * @par Example
- * @code
- * itk_type members[] = { ITK_TYPE_INT32, ITK_TYPE_PTR };
- * itk_layout lo;
- * if (itk_layout_of(members, 2, 0, &lo) == ITK_OK) {
- *     printf("size=%zu align=%zu\n", lo.size, lo.align);
- * }
- * @endcode
- *
- * @sa itk_layout, itk_ctypes
- * @since 0.1.0
- */
-ITK_DEF itk_status itk_layout_of(const itk_type *members, size_t count,
-                                 unsigned packing, itk_layout *out);
+Undocumented symbols fail review, regardless of how obvious the purpose
+seems.
 
-Apply the same richness to FFItk (`@ingroup ffi_cif`, etc.), and note in docstrings when a symbol wraps or relies on InteropTk (`@sa itk_callconv`).
+### 7.3 Thread safety and ownership annotations
 
-## Implementation Workflow for Agents
+Use `@note` to state:
+- Who owns heap memory and who frees it.
+- Whether a function is safe to call from multiple threads simultaneously.
+- Whether a handle becomes invalid after a call.
 
-1. **Read the manifest** for the toolkit you are editing (`manifests/*.yaml`). Treat its `modules`, `provides`, and `depends-on` as authoritative.
-2. **Implement lowest-dependency modules first.** Suggested order:
-   - InteropTk: `platform` → `ctypes` → `layout` → `callconv` → `mangle` → `cdecl` → `marshal` → `cstring` → `error` → `alloc` → `export`.
-   - FFItk: `loader` / `trampoline` → `cif` → `frame` → `call` → `closure` → `library`.
-3. **Match header ↔ manifest.** Ensure each `provides` symbol exists with the documented signature, and every new public symbol is added back to the manifest.
-4. **Respect stability flags.** For modules marked `experimental`, mark the corresponding symbols with `@warning This API is experimental and may change before 1.0.` in their docstrings.
-5. **Keeps build/installation simple.** Ensure files under `include/` are self-contained and ready to compile when standard headers and dependencies are visible in the search paths.
+---
+
+## 8. Error Handling
+
+- Every function that can fail returns an `<prefix>_status` code (e.g.
+  `etk_status`, `itk_status`).
+- Return values are the primary error channel. Do not `abort()`, `exit()`,
+  or call `assert()` in library code.
+- `assert()` is permitted **only** in `*_IMPLEMENTATION` blocks to catch
+  programmer errors (null handle passed where non-null is required). It
+  must be wrapped in a macro that the user can disable with `NDEBUG`.
+- Do not use `errno` as a primary error mechanism. Map OS errors to the
+  subsystem's status codes. Preserve the raw OS error in a caller-supplied
+  diagnostic buffer when the API provides one.
+- Status codes are defined in each subsystem's `types.h`. Do not invent
+  new codes inline; add them to the manifest and `types.h` first.
+
+---
+
+## 9. Memory Management
+
+- Libraries do **not** own an allocator. All heap allocation visible across
+  a module boundary must accept a caller-supplied allocator pair
+  (`alloc_fn` / `free_fn`) or an allocator context struct.
+- Allocation helpers from `InteropTk::alloc` provide the standard
+  allocator interface; use them rather than calling `malloc`/`free`
+  directly in cross-boundary code.
+- Never `free` a pointer that was not allocated by the paired allocator.
+- Structures that own heap memory must document their own
+ `*_destroy` or
+  `*_fini` function clearly.
+
+---
+
+## 10. Pull Request and Agent Workflow
+
+1.  **Check Manifest:** Read the YAML entry for the module you are about
+    to touch. List the symbols it `provides`.
+2.  **Verify Dependencies:** List the modules in its `depends_on`. Ensure
+    those headers are included and their symbols used.
+3.  **Low-level first:** If you need to implement `FFItk::cif`, but
+    `InteropTk::layout` is missing, you must implement the `InteropTk`
+    module first.
+4.  **No shortcuts:** Do not bypass the manifest to "get something working."
+    Add the symbol to the manifest first.
+5.  **Test implementation:** Along with the header, provide a minimal
+    `tests/` snippet showing how the implementation guard is used.
+6.  **Refuse out-of-scope work:** If asked to add networking or GUI
+    primitives, refuse. ExolangTk is restricted to Interoperability,
+    FFI, Debugging, and Extension management.
