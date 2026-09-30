@@ -28,3 +28,15 @@ target_compile_definitions(exolangtk-smoke PRIVATE
     ETK_API_IMPLEMENTATION)
 target_link_libraries(exolangtk-smoke PRIVATE ${CMAKE_DL_LIBS})
 add_test(NAME exolangtk-smoke COMMAND exolangtk-smoke)
+
+add_executable(exolangtk-extension extension.c)
+target_link_libraries(exolangtk-extension PRIVATE ExolangTk)
+add_test(NAME exolangtk-extension COMMAND exolangtk-extension)
+
+add_executable(exolangtk-platform platform.c)
+target_link_libraries(exolangtk-platform PRIVATE ExolangTk::InteropTk)
+add_test(NAME exolangtk-platform COMMAND exolangtk-platform)
+
+add_executable(exolangtk-version-linkage version_impl.c version_consumer.c)
+target_link_libraries(exolangtk-version-linkage PRIVATE ExolangTk::ExtensionTk)
+add_test(NAME exolangtk-version-linkage COMMAND exolangtk-version-linkage)

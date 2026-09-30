@@ -234,11 +234,7 @@ ITK_DEF itk_target_info *itk_target_query(itk_target_info *info);
 static unsigned char itk_byteorder_probe_(void)
 {
     const uint16_t probe = (uint16_t)0x0102u;
-    unsigned char bytes[2];
-
-    bytes[0] = (unsigned char)((probe & 0x0100u) >> 8); /* 0x01 */
-    bytes[1] = (unsigned char)(probe & 0x00ffu);        /* 0x02 */
-    /* On little-endian hosts the low byte (0x02) sits at address 0. */
+    const unsigned char *bytes = (const unsigned char *)&probe;
     return (bytes[0] == 0x02u) ? (unsigned char)ITK_BYTEORDER_LITTLE
                                : (unsigned char)ITK_BYTEORDER_BIG;
 }

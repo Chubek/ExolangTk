@@ -27,7 +27,9 @@ InteropTk is the foundation. ExtensionTk does not depend on DebugTk.
 ## Quick start
 
 Each module is a single header. Define its implementation macro in exactly one
-translation unit, then include the header normally everywhere else.
+translation unit. For calls from other translation units, also define the
+subsystem qualifier (for example `ITK_DEF`) as `extern` consistently in all
+translation units; its default is `static`.
 
 ```c
 /* main.c */
@@ -90,3 +92,17 @@ names, dependencies, stability, and exported symbols.
 - Fallible operations return subsystem status values instead of aborting.
 
 The project is licensed under the MIT License.
+
+## Implementation status
+
+Version parsing, comparison, constraints, and registry lifecycle management
+have regression coverage. The registry validates missing dependencies and
+cycles before callbacks, skips active entries, and rolls back newly activated
+entries on failure. Its struct now includes an activation journal; rebuild
+consumers that embed it.
+
+Several backend APIs still contain placeholders: native foreign calls and
+closure generation, DebugTk symbol lookup and built-in unwinding, and backtrace
+capture. Extension path search currently only copies the supplied name. Consult
+header implementations before relying on these APIs; module stability labels
+currently overstate coverage. This project is not yet a complete native FFI.

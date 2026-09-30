@@ -34,11 +34,19 @@ cmake --build build
 cmake --install build
 ```
 
-Installation copies the `include/` tree and exports the `ExolangTk` CMake
-target files under `${CMAKE_INSTALL_LIBDIR}/cmake/ExolangTk`. The project
-currently does not generate a package-config file, so consumers may either
-use the installed export with their own CMake package glue or add the source
-tree with `add_subdirectory`.
+Installation copies headers and exports a relocatable CMake package under
+`${CMAKE_INSTALL_LIBDIR}/cmake/ExolangTk`. Consumers can use:
+
+```cmake
+find_package(ExolangTk 0.1 CONFIG REQUIRED)
+target_link_libraries(my_runtime PRIVATE ExolangTk::ExolangTk)
+```
+
+The narrower targets `ExolangTk::InteropTk`, `ExolangTk::FFItk`,
+`ExolangTk::DebugTk`, and `ExolangTk::ExtensionTk` are also available in
+both installed packages and source builds. They propagate C99, include paths,
+subsystem dependencies, and the dynamic loader link library where applicable.
+Set `CMAKE_PREFIX_PATH` to the installation prefix when configuring a consumer.
 
 For a user-local install:
 
@@ -75,13 +83,19 @@ Generated HTML is placed in `build/docs/doxygen/html/`.
 
 ## Consuming headers correctly
 
-Define implementation guards in exactly one translation unit. For example:
+The default qualifier macros expand to `static`, which supports a self-contained
+translation unit. For calls across translation units, define the relevant
+qualifier (`ITK_DEF`, `FFI_DEF`, `DTK_DEF`, or `ETK_DEF`) as `extern` consistently
+in every translation unit. Define implementation guards only in the source
+file that supplies the function bodies, before its first include. Implement
+any dependency functions that the selected module calls as well.
+
+For example, use `ETK_DEF=extern` throughout a project, and put this in one
+implementation source file:
 
 ```c
-#define ITK_PLATFORM_IMPLEMENTATION
-#define ITK_CTYPES_IMPLEMENTATION
-#include "InteropTk.h"
+#define ETK_VERSION_IMPLEMENTATION
+#include "ExtensionTk/etk_version.h"
 ```
 
-All other source files should include `InteropTk.h` without those definitions.
-See [`GUIDE.md`](GUIDE.md) for the full guard and subsystem workflow.
+Other source files include that header without the implementation guard.

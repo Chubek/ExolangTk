@@ -89,12 +89,12 @@ modules:
       and constraint checking ("^1.2.0", ">=2.0.0 <3.0.0", "1.x") so hosts can
       gate extension compatibility without pulling in a dependency.
     provides:
-      - etk_version struct and etk_version_parse()
+      - etk_version struct (major, minor, patch, prerelease, prerelease_len) and etk_version_parse()
       - etk_version_compare(), etk_version_fmt()
       - etk_version_satisfies() constraint checking
     depends-on:
       internal: [platform, types]
-      interoptk: [platform, cstring]
+      interoptk: []
     stability: stable
 
   - name: registry
@@ -105,15 +105,16 @@ modules:
       activates extensions in topological order through their lifecycle
       callbacks. All state lives in a caller-supplied registry instance.
     provides:
-      - etk_extension descriptor and etk_registry instance
+      - etk_extension descriptor (id, version, dependencies, dependency_count, activate, deactivate, ctx, active)
+      - etk_registry instance (entries, count, activation_order, active_count, busy)
       - etk_registry_init(), etk_registry_register()
       - etk_registry_activate() topological activation
       - etk_registry_find(), etk_registry_count()
       - etk_registry_deactivate_all() reverse-order teardown
       - ETK_REGISTRY_MAX_EXTENSIONS capacity macro constant
     depends-on:
-      internal: [platform, types, dynload, version]
-      interoptk: [platform, cstring, alloc, error]
+      internal: [platform, types, version]
+      interoptk: []
     stability: experimental
 
   - name: api
